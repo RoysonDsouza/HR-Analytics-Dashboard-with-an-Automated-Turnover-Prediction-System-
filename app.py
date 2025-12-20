@@ -45,7 +45,7 @@ st.markdown("""
 # Cover Image
 st.image(
     #"https://images.unsplash.com/photo-1556761175-5973dc0f32e7?q=80&w=2832&auto=format&fit=crop",
-    '/Users/barabank/Capstone project/HR.png',
+    './HR.png',
     use_container_width=True,
 )
 
