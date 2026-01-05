@@ -5,3 +5,4 @@ joblib
 numpy
 matplotlib
 scikit-learn
+catboost
