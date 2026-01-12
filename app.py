@@ -19,7 +19,7 @@ except ImportError:
 # 1. Page Configuration & Session State
 # ==========================================
 st.set_page_config(
-    page_title="HR Analytics Dashboard (Combined)",
+    page_title="HR Analytics Dashboard",
     page_icon="📊",
     layout="wide"
 )
@@ -61,7 +61,7 @@ def upload_callback():
 def select_default_callback():
     st.session_state.uploaded_cover_file = None 
 
-# --- 🎨 CSS STYLING (Combined) ---
+# --- 🎨 CSS STYLING ---
 st.markdown(f"""
 <style>
     :root {{ --primary-color: {st.session_state.primary_color}; }}
@@ -259,7 +259,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ส่วนปุ่มเดิมของคุณ
 if st.sidebar.button("🔄 Generate & Update DB", type="primary"):
     if auto_pipeline is None:
         st.sidebar.error("auto_pipeline.py not found!")
@@ -326,7 +325,7 @@ else:
 # 4. Main Dashboard Layout
 # ==========================================
 
-# --- Header & Update Badge (Combined) ---
+# --- Header & Update Badge ---
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("📊 HR Analytics Dashboard")
@@ -337,7 +336,7 @@ with c2:
         </div>
     """, unsafe_allow_html=True)
 
-# --- Cover Image (From App 4) ---
+# --- Cover Image ---
 if st.session_state.uploaded_cover_file is not None:
     image_to_display = st.session_state.uploaded_cover_file
 else:
@@ -510,7 +509,7 @@ with tab2:
             ax_com.set_ylabel('Distance (km)')
             st.pyplot(fig_com)
 
-# --- Tab 3: Prediction Refresh ---
+# --- Tab 3: Predict New Data (Enhanced Visuals) ---
 with tab3:
     st.header("🔄 Predict New Employees")
     uploaded_file = st.file_uploader("Upload CSV File", type=['csv'])
@@ -518,88 +517,49 @@ with tab3:
     
     if uploaded_file is not None:
         try:
+            # 1. Load Data
             new_data_raw = pd.read_csv(uploaded_file)
             
-            # Fix columns for display (Real values)
+            # (Optional) สร้างคอลัมน์ _Real ไว้สำหรับแสดงผล (ถ้ามี logic unscale)
+            # เพื่อให้ sidebar ที่เลือก 'MonthlyIncome_Real' ทำงานได้กับไฟล์ที่อัปโหลด
             for col in new_data_raw.columns:
-                if col in unscale_params:
+                # ถ้า user อัปโหลดไฟล์ที่มีคอลัมน์ปกติ เราจะ copy ไปชื่อ _Real เพื่อให้ match กับตัวเลือกใน Sidebar
+                if f"{col}_Real" not in new_data_raw.columns:
                     new_data_raw[f"{col}_Real"] = new_data_raw[col]
-            numeric_cols_fix = ['Education', 'JobLevel', 'StockOptionLevel', 'JobInvolvement', 'PerformanceRating', 'RelationshipSatisfaction', 'WorkLifeBalance', 'EnvironmentSatisfaction', 'JobSatisfaction']
-            for c in numeric_cols_fix:
-                if c in new_data_raw.columns:
-                    new_data_raw[f"{c}_Real"] = new_data_raw[c]
-
+            
             st.markdown("### 1. Raw Data Preview")
             st.dataframe(new_data_raw.head())
             
             if st.button("Run Prediction"):
                 if os.path.exists(MODEL_PATH):
                     try:
-                        # 1. PREPROCESSING (AUTO-FIX)
+                        # 2. Load Model
+                        final_model = joblib.load(MODEL_PATH)
+                        
+                        # 3. Prepare Data
                         X_new = new_data_raw.copy()
+                        drop_cols_pred = ['EmployeeCount', 'EmployeeNumber', 'Over18', 'StandardHours', 'Attrition', 'employee_resignation_probability']
+                        # ลบคอลัมน์ _Real ที่เราเพิ่งสร้างหลอกๆ ออกก่อนส่งเข้า Model
+                        X_new = X_new.drop(columns=[c for c in X_new.columns if '_Real' in c]) 
+                        X_new = X_new.drop(columns=[c for c in drop_cols_pred if c in X_new.columns])
                         
-                        # Encode Basic Text
-                        for col, mapping in maps.items():
-                            if col in X_new.columns and col != 'EducationField':
-                                reverse_map = {v: k for k, v in mapping.items()}
-                                X_new[col] = X_new[col].map(reverse_map).fillna(X_new[col])
+                        # --- CatBoost Preparation ---
+                        cat_cols = [col for col in X_new.columns if X_new[col].dtype == 'object']
+                        for col in cat_cols:
+                            X_new[col] = X_new[col].fillna('Missing').astype(str)
+                            
+                        # Align Columns
+                        if hasattr(final_model, 'feature_names_'):
+                            model_features = final_model.feature_names_
+                            for f in model_features:
+                                if f not in X_new.columns:
+                                    X_new[f] = 0 if f not in cat_cols else 'Missing'
+                            X_new = X_new[model_features]
 
-                        # Handle EducationField (Manual One-Hot Logic from App 4 for better accuracy)
-                        if 'EducationField' in X_new.columns:
-                            edu_col = X_new['EducationField']
-                        else:
-                            edu_col = pd.Series(['Other'] * len(X_new))
-                        
-                        edu_map_vals = {'Life Sciences': 5, 'Medical': 4, 'Marketing': 3, 'Technical Degree': 2, 'Other': 0, 'Human Resources': 1}
-                        edu_num = edu_col.map(edu_map_vals).fillna(0)
-                        
-                        # Try to create OH columns if model needs them (Robust method)
-                        for i in [0, 1, 2, 3, 4, 5]:
-                            X_new[f'EducationField_{i}'] = (edu_num == i).astype(int)
-                        
-                        # Also keep raw mapped for tree models
-                        X_new['EducationField'] = edu_num
-
-                        # 2. LOAD MODEL & DETECT FEATURES
-                        loaded_object = joblib.load(MODEL_PATH)
-                        def get_leaf_estimator(obj):
-                            if hasattr(obj, 'best_estimator_'): return get_leaf_estimator(obj.best_estimator_)
-                            if hasattr(obj, 'steps'): return get_leaf_estimator(obj.steps[-1][1])
-                            return obj
-                        final_model = get_leaf_estimator(loaded_object)
-                        
-                        # Try to get features from model
-                        model_feature_names = None
-                        if hasattr(final_model, 'feature_names_'): model_feature_names = final_model.feature_names_
-                        elif hasattr(final_model, 'get_feature_names'): model_feature_names = final_model.get_feature_names()
-                        elif hasattr(final_model, 'feature_names_in_'): model_feature_names = final_model.feature_names_in_
-
-                        # 3. AUTO-REORDER COLUMNS
-                        if model_feature_names is not None:
-                            X_final = pd.DataFrame()
-                            for feature in model_feature_names:
-                                if feature in X_new.columns:
-                                    X_final[feature] = X_new[feature]
-                                else:
-                                    X_final[feature] = 0
-                            X_new = X_final
-                        else:
-                            # Fallback
-                            base_features = ['Age', 'BusinessTravel', 'DailyRate', 'Department', 'DistanceFromHome', 'Education', 'EnvironmentSatisfaction', 'Gender', 'HourlyRate', 'JobInvolvement', 'JobLevel', 'JobRole', 'JobSatisfaction', 'MaritalStatus', 'MonthlyIncome', 'MonthlyRate', 'NumCompaniesWorked', 'OverTime', 'PercentSalaryHike', 'PerformanceRating', 'RelationshipSatisfaction', 'StockOptionLevel', 'TotalWorkingYears', 'TrainingTimesLastYear', 'WorkLifeBalance', 'YearsAtCompany', 'YearsInCurrentRole', 'YearsSinceLastPromotion', 'YearsWithCurrManager', 'EducationField']
-                            for f in base_features:
-                                if f not in X_new.columns: X_new[f] = 0
-                            valid_cols = [c for c in base_features if c in X_new.columns]
-                            X_new = X_new[valid_cols]
-
-                        # 4. SCALING
-                        for col in X_new.columns:
-                            X_new[col] = pd.to_numeric(X_new[col], errors='coerce').fillna(0)
-                            if col in unscale_params:
-                                params = unscale_params[col]
-                                X_new[col] = (X_new[col] - params['mean']) / params['std']
-
-                        # 5. PREDICT
+                        # 4. Predict
                         probs = final_model.predict_proba(X_new)[:, 1]
+                        
+                        # 5. Show Results
                         new_data_raw['employee_resignation_probability'] = probs
                         
                         st.success("✅ Predictions generated successfully!")
@@ -611,11 +571,19 @@ with tab3:
                         col_m3.metric("High Risk Percentage", f"{((probs > risk_threshold).sum() / len(probs)) * 100:.1f}%")
                         
                         st.markdown("---")
+                        
+                        # Layout: Graph (Left) vs High Risk Cards (Right)
                         col_d1, col_d2 = st.columns([2, 1])
                         
+                        # --- Left: Graph ---
                         with col_d1:
                             st.subheader("Risk Category Breakdown")
-                            new_data_raw['Risk_Category'] = new_data_raw['employee_resignation_probability'].apply(lambda x: categorize_risk(x, risk_threshold))
+                            def categorize_risk_temp(prob, threshold):
+                                if prob < (threshold * 0.5): return 'Safe Zone'
+                                elif prob < threshold: return 'Watchlist'
+                                else: return 'High Risk'
+                                
+                            new_data_raw['Risk_Category'] = new_data_raw['employee_resignation_probability'].apply(lambda x: categorize_risk_temp(x, risk_threshold))
                             n_counts = new_data_raw['Risk_Category'].value_counts()
                             
                             if not n_counts.empty:
@@ -623,66 +591,79 @@ with tab3:
                                 ax_pred = fig_pred.subplots()
                                 n_colors = [{'Safe Zone': '#4CAF50', 'Watchlist': '#FFC107', 'High Risk': '#FF5252'}.get(x, '#999') for x in n_counts.index]
                                 
-                                # Use same chart style preference
                                 if chart_style == "Bar Chart":
                                     bars = ax_pred.bar(n_counts.index, n_counts.values, color=n_colors)
-                                    ax_pred.set_ylabel("Count")
-                                    ax_pred.bar_label(bars, fmt='%d', fontsize=10)
-                                elif chart_style == "Donut Chart":
-                                    _ = ax_pred.pie(n_counts, labels=n_counts.index, autopct='%1.1f%%', colors=n_colors, startangle=90, wedgeprops=dict(width=0.4))
-                                    ax_pred.axis('equal') 
+                                    ax_pred.bar_label(bars, fmt='%d')
                                 else:
-                                    _ = ax_pred.pie(n_counts, labels=n_counts.index, autopct='%1.1f%%', colors=n_colors, startangle=90)
-                                    ax_pred.axis('equal') 
-                                
+                                    ax_pred.pie(n_counts, labels=n_counts.index, autopct='%1.1f%%', colors=n_colors, startangle=90)
                                 st.pyplot(fig_pred)
 
+                        # --- Right: High Risk Cards (Updated Visuals) ---
                         with col_d2:
                             st.subheader(f"🚨 Top High Risk (New Data)")
+                            # Filter & Sort
                             n_top = new_data_raw[new_data_raw['employee_resignation_probability'] > risk_threshold].sort_values(by='employee_resignation_probability', ascending=False).head(top_n_employees)
                             
                             if n_top.empty:
                                 st.info("No high risk found.")
                             else:
                                 for idx, row in n_top.iterrows():
-                                    with st.container(border=True):
+                                    with st.container(border=True): # ใช้กรอบ Card แบบ Tab 1
+                                        # Handle Employee ID
                                         emp_id_val = row.get('EmployeeNumber')
                                         if pd.isna(emp_id_val): emp_id_display = idx 
-                                        else: emp_id_display = int(float(emp_id_val))
+                                        else: emp_id_display = int(float(emp_id_val)) # Handle float ID
 
+                                        # 1. Image Profile
                                         st.markdown(f"""
                                             <div style="display: flex; justify-content: center; margin-top: 10px; margin-bottom: 10px;">
                                                 <img src="https://i.pravatar.cc/150?u={emp_id_display}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;">
                                             </div>
                                         """, unsafe_allow_html=True)
+                                        
+                                        # 2. Header Info
                                         st.markdown(f"<div style='text-align: center;'><b>ID: {emp_id_display}</b></div>", unsafe_allow_html=True)
-                                        st.markdown(f"<div style='text-align: center; color: red; font-weight: bold;'>Risk: {row['employee_resignation_probability']:.1%}</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='text-align: center; color: #FF5252; font-weight: bold;'>Risk: {row['employee_resignation_probability']:.1%}</div>", unsafe_allow_html=True)
                                         st.markdown("---")
                                         
+                                        # 3. Dynamic Details (from Sidebar)
+                                        # ใช้ตัวแปร selected_card_details จาก Sidebar
                                         if selected_card_details:
                                             for cname in selected_card_details:
-                                                raw_val = row.get(cname) or row.get(cname.replace('_Real', ''))
-                                                if raw_val is not None:
-                                                    disp_val = str(raw_val)
+                                                # พยายามหาค่า (รองรับทั้งชื่อปกติ และชื่อมี _Real)
+                                                val = None
+                                                clean_name = cname.replace('_Real', '')
+                                                
+                                                if cname in row: val = row[cname]
+                                                elif clean_name in row: val = row[clean_name]
+                                                
+                                                if val is not None:
+                                                    disp_val = str(val)
+                                                    # จัด Format เงิน/ระยะทาง ให้สวยงาม
                                                     try:
-                                                        if isinstance(raw_val, (int, float)):
-                                                            if 'Income' in cname or 'Rate' in cname: disp_val = f"${raw_val:,.0f}"
-                                                            elif 'Distance' in cname: disp_val = f"{int(raw_val)} Km"
+                                                        if isinstance(val, (int, float)):
+                                                            if 'Income' in cname or 'Rate' in cname: disp_val = f"${val:,.0f}"
+                                                            elif 'Distance' in cname: disp_val = f"{int(val)} Km"
                                                     except: pass
-                                                    st.markdown(f"<div style='text-align: center; font-size: 0.9em;'><b>{cname.replace('_Real','')}:</b> {disp_val}</div>", unsafe_allow_html=True)
+                                                    
+                                                    st.markdown(f"<div style='text-align: center; font-size: 0.9em;'><b>{clean_name}:</b> {disp_val}</div>", unsafe_allow_html=True)
+                                        
                                         st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
-                        
+
                         st.markdown("---")
-                        st.markdown("### 📥 Download Results")
-                        csv = new_data_raw.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download CSV", csv, "prediction_results.csv", "text/csv")
+                        st.download_button(
+                            "Download Results (CSV)",
+                            new_data_raw.to_csv(index=False).encode('utf-8'),
+                            "prediction_results.csv",
+                            "text/csv"
+                        )
 
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Prediction Error: {e}")
                 else:
-                    st.warning("Model not found.")
+                    st.warning("Model file not found. Please run the pipeline first.")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"File Error: {e}")
 
 st.markdown("---")
 st.caption("HR Analytics Dashboard | Built with Royson Dsouza & Sarawut Boonyarat")
