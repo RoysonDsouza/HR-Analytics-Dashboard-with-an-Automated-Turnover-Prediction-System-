@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from datetime import datetime
 import time
 
-# Import auto_pipeline if available
+# Import auto_pipeline
 try:
     import auto_pipeline
 except ImportError:
@@ -509,7 +509,7 @@ with tab2:
             ax_com.set_ylabel('Distance (km)')
             st.pyplot(fig_com)
 
-# --- Tab 3: Predict New Data (Enhanced Visuals) ---
+# --- Tab 3: Predict New Data ---
 with tab3:
     st.header("🔄 Predict New Employees")
     uploaded_file = st.file_uploader("Upload CSV File", type=['csv'])
@@ -520,10 +520,7 @@ with tab3:
             # 1. Load Data
             new_data_raw = pd.read_csv(uploaded_file)
             
-            # (Optional) สร้างคอลัมน์ _Real ไว้สำหรับแสดงผล (ถ้ามี logic unscale)
-            # เพื่อให้ sidebar ที่เลือก 'MonthlyIncome_Real' ทำงานได้กับไฟล์ที่อัปโหลด
             for col in new_data_raw.columns:
-                # ถ้า user อัปโหลดไฟล์ที่มีคอลัมน์ปกติ เราจะ copy ไปชื่อ _Real เพื่อให้ match กับตัวเลือกใน Sidebar
                 if f"{col}_Real" not in new_data_raw.columns:
                     new_data_raw[f"{col}_Real"] = new_data_raw[col]
             
@@ -539,7 +536,6 @@ with tab3:
                         # 3. Prepare Data
                         X_new = new_data_raw.copy()
                         drop_cols_pred = ['EmployeeCount', 'EmployeeNumber', 'Over18', 'StandardHours', 'Attrition', 'employee_resignation_probability']
-                        # ลบคอลัมน์ _Real ที่เราเพิ่งสร้างหลอกๆ ออกก่อนส่งเข้า Model
                         X_new = X_new.drop(columns=[c for c in X_new.columns if '_Real' in c]) 
                         X_new = X_new.drop(columns=[c for c in drop_cols_pred if c in X_new.columns])
                         
@@ -590,15 +586,35 @@ with tab3:
                                 fig_pred = Figure(figsize=(5, 5))
                                 ax_pred = fig_pred.subplots()
                                 n_colors = [{'Safe Zone': '#4CAF50', 'Watchlist': '#FFC107', 'High Risk': '#FF5252'}.get(x, '#999') for x in n_counts.index]
-                                
                                 if chart_style == "Bar Chart":
                                     bars = ax_pred.bar(n_counts.index, n_counts.values, color=n_colors)
-                                    ax_pred.bar_label(bars, fmt='%d')
+                                    ax_pred.set_ylabel("Count")
+                                    ax_pred.bar_label(bars, fmt='%d', fontsize=10)
+                                    
+                                elif chart_style == "Donut Chart":
+                                    wedges, texts, autotexts = ax_pred.pie(
+                                        n_counts, 
+                                        labels=n_counts.index, 
+                                        autopct='%1.1f%%', 
+                                        colors=n_colors, 
+                                        startangle=90, 
+                                        wedgeprops=dict(width=0.4) # เจาะรูตรงกลาง
+                                    )
+                                    ax_pred.axis('equal') 
+
                                 else:
-                                    ax_pred.pie(n_counts, labels=n_counts.index, autopct='%1.1f%%', colors=n_colors, startangle=90)
+                                    wedges, texts, autotexts = ax_pred.pie(
+                                        n_counts, 
+                                        labels=n_counts.index, 
+                                        autopct='%1.1f%%', 
+                                        colors=n_colors, 
+                                        startangle=90
+                                    )
+                                    ax_pred.axis('equal') 
+                                
                                 st.pyplot(fig_pred)
 
-                        # --- Right: High Risk Cards (Updated Visuals) ---
+                        # --- Right: High Risk Cards (With Images & Details) ---
                         with col_d2:
                             st.subheader(f"🚨 Top High Risk (New Data)")
                             # Filter & Sort
@@ -627,10 +643,8 @@ with tab3:
                                         st.markdown("---")
                                         
                                         # 3. Dynamic Details (from Sidebar)
-                                        # ใช้ตัวแปร selected_card_details จาก Sidebar
                                         if selected_card_details:
                                             for cname in selected_card_details:
-                                                # พยายามหาค่า (รองรับทั้งชื่อปกติ และชื่อมี _Real)
                                                 val = None
                                                 clean_name = cname.replace('_Real', '')
                                                 
@@ -639,7 +653,6 @@ with tab3:
                                                 
                                                 if val is not None:
                                                     disp_val = str(val)
-                                                    # จัด Format เงิน/ระยะทาง ให้สวยงาม
                                                     try:
                                                         if isinstance(val, (int, float)):
                                                             if 'Income' in cname or 'Rate' in cname: disp_val = f"${val:,.0f}"
