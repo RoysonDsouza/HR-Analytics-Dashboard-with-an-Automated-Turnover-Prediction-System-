@@ -26,7 +26,7 @@ st.set_page_config(
 
 # --- UI Settings Option ---
 IMAGE_OPTIONS = {
-    'Local (HR.png)': '/Users/barabank/Capstone project/HR.png', 
+    'Local (HR.png)': 'HR.png', 
     'Online (Office)': "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?q=80&w=2832&auto=format&fit=crop",
 }
 
